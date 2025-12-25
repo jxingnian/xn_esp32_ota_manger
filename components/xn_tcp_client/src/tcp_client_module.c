@@ -384,10 +384,28 @@ esp_err_t tcp_client_recv(uint8_t *buf, size_t buf_size, size_t *recv_len, int t
             *recv_len = 0;
             return ESP_ERR_TIMEOUT;
         }
-        ESP_LOGE(TAG, "Recv failed: errno=%d", errno);
+        /* 连接断开或其他错误，关闭socket并更新状态 */
+        ESP_LOGE(TAG, "Recv failed: errno=%d, closing connection", errno);
+        if (xSemaphoreTake(s_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+            if (s_socket >= 0) {
+                close(s_socket);
+                s_socket = -1;
+            }
+            tcp_client_set_state(TCP_CLIENT_STATE_DISCONNECTED);
+            xSemaphoreGive(s_mutex);
+        }
         return ESP_FAIL;
     } else if (len == 0) {
-        /* 连接被关闭 */
+        /* 连接被对端关闭 */
+        ESP_LOGI(TAG, "Connection closed by peer");
+        if (xSemaphoreTake(s_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+            if (s_socket >= 0) {
+                close(s_socket);
+                s_socket = -1;
+            }
+            tcp_client_set_state(TCP_CLIENT_STATE_DISCONNECTED);
+            xSemaphoreGive(s_mutex);
+        }
         *recv_len = 0;
         return ESP_ERR_INVALID_STATE;
     }
