@@ -24,8 +24,8 @@ static const char *TAG = "app_main";
 /* 仅在首次拿到 IP 后初始化一次 OTA 管理 */
 static bool s_ota_inited = false;
 
-/* TCP 定时发送任务 */
-static void tcp_send_task(void *arg)
+/* TCP 回环任务：收到数据后原样发回 */
+static void tcp_loopback_task(void *arg)
 {
 	(void)arg;
 
@@ -50,23 +50,23 @@ static void tcp_send_task(void *arg)
 		ESP_LOGE(TAG, "tcp_client_connect failed: %s", esp_err_to_name(ret));
 	}
 
-	/* 定时发送测试数据 */
-	uint32_t count = 0;
-	char send_buf[64];
+	uint8_t recv_buf[256];
+	size_t recv_len = 0;
 
 	for (;;) {
 		if (tcp_client_is_connected()) {
-			snprintf(send_buf, sizeof(send_buf), "Test data #%lu\r\n", count++);
-			ret = tcp_client_send((uint8_t *)send_buf, strlen(send_buf));
-			if (ret == ESP_OK) {
-				ESP_LOGI(TAG, "Sent: %s", send_buf);
+			/* 等待接收数据 */
+			ret = tcp_client_recv(recv_buf, sizeof(recv_buf), &recv_len, 1000);
+			if (ret == ESP_OK && recv_len > 0) {
+				ESP_LOGI(TAG, "Recv %d bytes, echo back", recv_len);
+				/* 原样发回 */
+				tcp_client_send(recv_buf, recv_len);
 			}
 		} else {
 			/* 未连接时尝试重连 */
 			tcp_client_connect();
+			vTaskDelay(pdMS_TO_TICKS(1000));
 		}
-
-		vTaskDelay(pdMS_TO_TICKS(3000)); /* 每3秒发送一次 */
 	}
 }
 
@@ -99,7 +99,7 @@ static void ota_init_task(void *arg)
 
 	/* OTA 检查完成（无论成功失败），启动 TCP 任务 */
 start_tcp:
-	xTaskCreate(tcp_send_task, "tcp_send", 4096, NULL, tskIDLE_PRIORITY + 1, NULL);
+	xTaskCreate(tcp_loopback_task, "tcp_loopback", 4096, NULL, tskIDLE_PRIORITY + 1, NULL);
 
 	vTaskDelete(NULL);
 }
