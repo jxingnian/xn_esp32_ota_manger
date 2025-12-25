@@ -1,0 +1,11 @@
+idf_component_register(
+    SRCS 
+        "src/tcp_client_module.c"
+    INCLUDE_DIRS 
+        "."
+        "include"
+    REQUIRES
+        lwip
+    PRIV_REQUIRES 
+        freertos
+)
